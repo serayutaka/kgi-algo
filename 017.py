@@ -91,6 +91,9 @@ def calculate_total_value(last_prices):
     total_value = portfolio["cash"] + stock_value
     return total_value
 
+def calculate_stock_value(last_prices):
+    return sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items())
+
 statements = []
 number_of_wins = 0
 queue_for_calculate_pl = []
@@ -179,11 +182,10 @@ def optimize_trading_strategy(data):
 
     for index in range(len(processed_data)):
         row = processed_data.iloc[index]
+        last_prices[row["ShareCode"]] = row["LastPrice"]
         
         # Skip already processed rows or invalid rows
         if row['Processed'] or row['Flag'] not in ["Buy", "Sell"]:
-            if row['Flag'] == "ATC":
-                last_prices[row["ShareCode"]] = row["LastPrice"]
             continue
 
         stock_code = row["ShareCode"]
@@ -296,10 +298,19 @@ sell_summary = statements_df[statements_df['Side'] == 'Sell'].groupby('Stock Nam
     'Volume': 'sum'
 }).reset_index()
 
+def get_previous_actual_volume(stock_code, previous_portfolio):
+    if not isinstance(previous_portfolio, pd.DataFrame):
+        return 0
+    stock_row = previous_portfolio[previous_portfolio["Stock Name"] == stock_code]
+    if not stock_row.empty:
+        return stock_row["Actual Vol"].values[0]
+    return 0
+
 for stock_code, volume in portfolio["stocks"].items():
     if volume == 0:
         continue
     price = last_prices.get(stock_code, 0)
+    start_vol = get_previous_actual_volume(stock_code, previous_portfolio)
     actual_vol = volume
     avg_cost = data[(data['ShareCode'] == stock_code) & (data['Flag'].isin(['Buy', 'Sell']))]['LastPrice'].mean()
     market_price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == stock_code].values[0]
@@ -316,7 +327,7 @@ for stock_code, volume in portfolio["stocks"].items():
         'Table Name': 'Portfolio',
         'File Name': '017_portfolio.csv',
         'Stock Name': stock_code,
-        'Start Vol': 0,
+        'Start Vol': start_vol,
         'Actual Vol': "{:.4f}".format(actual_vol),
         'Avg Cost': "{:.4f}".format(avg_cost),
         'Market Price': "{:.4f}".format(market_price),
@@ -331,9 +342,9 @@ portfolio_df = pd.DataFrame(portfolio_data)
 portfolio_df.to_csv(f'{output_dir}/portfolio/017_portfolio.csv', index=False)
 
 
-maximum_drawdown = (min(nav_lst) - max(nav_lst)) / max(nav_lst) if max(nav_lst) > 0 else 0
+maximum_drawdown = abs((min(nav_lst) - max(nav_lst)) / max(nav_lst)) if max(nav_lst) > 0 else 0
 relative_drawdown = (maximum_drawdown / 10_000_000) * 100
-calmar_ratio = ((total_value - 10_000_000) / 10_000_000) * 100
+calmar_ratio = (return_percentage / maximum_drawdown) if maximum_drawdown != 0 else 0
 total_wins = previous_summary['Number of Wins'].iloc[-1] + number_of_wins if isinstance(previous_summary, pd.DataFrame) else number_of_wins
 total_matches = previous_summary['Number of Matched Trades'].iloc[-1] + match_trades if isinstance(previous_summary, pd.DataFrame) else match_trades
 total_transactions = previous_summary['Number of Transactions'].iloc[-1] + len(statements) if isinstance(previous_summary, pd.DataFrame) else len(statements)
@@ -349,8 +360,8 @@ summary_data = [{
     'Table Name': 'Summary',
     'File Name': '017_summary.csv',
     'NAV': total_value,
-    'End Line Available': portfolio["cash"],
-    'Start Line Available': portfolio["cash"],
+    'End Line Available': "{:.4f}".format(portfolio["cash"]),
+    'Start Line Available': "{:.4f}".format(portfolio["cash"]),
     'Number of Wins': total_wins,
     'Number of Matched Trades': total_matches,
     'Number of Transactions': total_transactions,
