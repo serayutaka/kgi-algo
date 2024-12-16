@@ -4,11 +4,13 @@ import os
 from datetime import datetime
 import time
 
+start = time.time()
+
 # Define the base directory dynamically based on the OS
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_1112.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -40,12 +42,12 @@ data = pd.read_csv(file_path)
 data['TradeDateTime'] = pd.to_datetime(data['TradeDateTime'])  # Convert to datetime
 data.sort_values('TradeDateTime', inplace=True)  # Sort by datetime
 
-def calculate_indicators(data):
+def calculate_indicators(df):
     # Group once to improve performance
-    grouped = data.groupby('ShareCode')
+    grouped = df.groupby('ShareCode')
     
     # Moving Average - use more efficient rolling
-    data['MA_3'] = grouped['LastPrice'].transform(lambda x: x.rolling(window=3, min_periods=1).mean())
+    df['MA_3'] = grouped['LastPrice'].transform(lambda x: x.rolling(window=3, min_periods=1).mean())
     
     # RSI - simplified vectorized calculation
     def fast_rsi(x, window=3):
@@ -56,29 +58,34 @@ def calculate_indicators(data):
         rs = roll_up / roll_down
         return 100.0 - (100.0 / (1.0 + rs.values[0]))
     
-    data['rsi'] = grouped['LastPrice'].transform(fast_rsi)
+    df['rsi'] = grouped['LastPrice'].transform(fast_rsi)
     
     # MACD - simplified calculation
-    data['MACD'] = grouped['LastPrice'].transform(lambda x: 
+    df['MACD'] = grouped['LastPrice'].transform(lambda x: 
         x.ewm(span=12, adjust=False).mean() - x.ewm(span=26, adjust=False).mean()
     )
-    data['MACD_Signal'] = data['MACD'].ewm(span=9, adjust=False).mean()
+    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     
     # Vectorized Volume Signal
-    condition_1 = data['LastPrice'] < data['MA_3']
-    condition_2 = data['rsi'] < 20
-    condition_3 = data['MACD'] > data['MACD_Signal']
+    condition_1 = df['LastPrice'] < df['MA_3']
+    condition_2 = df['rsi'] < 20
+    condition_3 = df['MACD'] > df['MACD_Signal']
     
-    buy_conditions = (
+    passed_conditions = (
         condition_1.astype(int) + 
         condition_2.astype(int) + 
         condition_3.astype(int)
     )
     
-    data['VolumeSignal'] = np.where(
-        data['MACD'].isna(),
-        np.where(data['Volume'] > 19000, 'Buy', 'Hold'),
-        np.where(buy_conditions >= 2, 'Buy', 'Hold')
+    df['VolumeSignal'] = np.where(
+        df['MACD'].isna(),
+        np.where(df['Volume'] > 19000, 'Buy', 'Hold'),
+        np.where(passed_conditions >= 2, 'Buy', 'Hold')
+    )
+
+    df['FinalSignal'] = np.where(
+        (df['VolumeSignal'] == 'Buy') & (df['Flag'] == 'Sell'), 'Buy', 
+        np.where((df['VolumeSignal'] == 'Hold') & (df['Flag'] == 'Buy'), 'Sell', 'nan')
     )
     
     return data
@@ -94,8 +101,7 @@ previous_statement = load_previous("statement", "017")
 initial_cash = previous_summary['Start Line Available'].iloc[-1] if isinstance(previous_summary, pd.DataFrame) else 10_000_000
 portfolio = {
     "cash": initial_cash,
-    "stocks": {}
-    #"stocks": previous_portfolio.set_index('Stock Name')['Actual Vol'].to_dict() if isinstance(previous_portfolio, pd.DataFrame) else {}
+    "stocks": previous_portfolio.set_index('Stock Name')['Actual Vol'].to_dict() if isinstance(previous_portfolio, pd.DataFrame) else {}
 }
 print(f"Initial Cash: {initial_cash}")
 print(f"Initial Portfolio: {portfolio}")
@@ -159,6 +165,8 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
                 queue_for_calculate_pl_dict[stock_code] = {"Stock Name": stock_code, "Price": price} 
             else:
                 queue_for_calculate_pl_dict[stock_code]["Price"] = price     
+        else:
+            print(f"Not enough cash to buy {volume} of {stock_code} at {price} THB")
     elif trade_type == "Sell":
         if portfolio["stocks"].get(stock_code, 0) >= volume:
             portfolio["cash"] += trade_value
@@ -183,9 +191,10 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
             if stock_code in queue_for_calculate_pl_dict :
                 sell_price = price
                 buy_price = queue_for_calculate_pl_dict[stock_code]["Price"]
-                profit_or_loss = sell_price - buy_price
-                if profit_or_loss > 0:
+                if sell_price - buy_price > 0:
                     number_of_wins += 1
+        else:
+            print(f"Not enough stocks to sell {volume} of {stock_code} at {price} THB")
 
 last_prices_buy = {}
 last_prices_sell = {}
@@ -206,14 +215,14 @@ def optimize_trading_strategy(data):
         last_prices[row["ShareCode"]] = row["LastPrice"]
         
         # Skip already processed rows or invalid rows
-        if row['Processed'] or row['Flag'] not in ["Buy", "Sell"]:
+        if row['Processed'] or row['FinalSignal'] == "nan":
             continue
 
         stock_code = row["ShareCode"]
         price = row["LastPrice"]
         
         # Buying strategy
-        if row['VolumeSignal'] == 'Buy' and row['Flag'] == 'Sell':
+        if row['FinalSignal'] == 'Buy':
             cash = portfolio["cash"]
             affordable_share = (cash // price) // 100 * 100
             if affordable_share >= 100:
@@ -221,8 +230,7 @@ def optimize_trading_strategy(data):
                 subsequent_data = processed_data.iloc[index:].loc[
                     (processed_data.iloc[index:]['ShareCode'] == stock_code) & 
                     (processed_data.iloc[index:]['LastPrice'] == price) &
-                    (processed_data.iloc[index:]['VolumeSignal'] == 'Buy') & 
-                    (processed_data.iloc[index:]['Flag'] == 'Sell') &
+                    (processed_data.iloc[index:]['FinalSignal'] == 'Buy') & 
                     (processed_data.iloc[index:]['Processed'] == False)
                 ]
                 
@@ -244,7 +252,7 @@ def optimize_trading_strategy(data):
                     last_prices_buy[stock_code] = price
 
         # Selling strategy
-        elif row['VolumeSignal'] == 'Hold' and row['Flag'] == 'Buy':
+        elif row['FinalSignal'] == 'Sell':
             if stock_code in portfolio["stocks"].keys():
                 shares = portfolio["stocks"].get(stock_code, 0)
                 shares = shares - (shares % 100)
@@ -252,8 +260,7 @@ def optimize_trading_strategy(data):
                     subsequent_data = processed_data.iloc[index:].loc[
                         (processed_data.iloc[index:]['ShareCode'] == stock_code) & 
                         (processed_data.iloc[index:]['LastPrice'] == price) &
-                        (processed_data.iloc[index:]['VolumeSignal'] == 'Hold') & 
-                        (processed_data.iloc[index:]['Flag'] == 'Buy') &
+                        (processed_data.iloc[index:]['FinalSignal'] == 'Sell') & 
                         (processed_data.iloc[index:]['Processed'] == False)
                     ]
                     
@@ -399,3 +406,7 @@ summary_df = pd.DataFrame(summary_data)
 summary_df.to_csv(f'{output_dir}/summary/017_summary.csv', index=False)
 
 print("CSV files exported successfully.")
+
+end = time.time()
+t = end - start
+print(f"Time elapsed: {t} seconds")
