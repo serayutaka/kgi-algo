@@ -1,16 +1,13 @@
 import numpy as np
 import pandas as pd
 import os
-from datetime import datetime
 import time
-
-start = time.time()
 
 # Define the base directory dynamically based on the OS
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_1212.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -114,6 +111,11 @@ def calculate_previous_portfolio_value():
 previous_portfolio_total_value = previous_summary["NAV"] if isinstance(previous_summary, pd.DataFrame) else initial_cash
 nav_lst = previous_statement["NAV"].to_list() if isinstance(previous_statement, pd.DataFrame) else [previous_portfolio_total_value]
 last_prices = {}
+# Filter rows with 'ATC' flag for each Share Code
+atc_rows = data[data['Flag'] == 'ATC'].groupby('ShareCode').last()
+atc_rows_reset = atc_rows.reset_index()
+
+time.sleep(5)
 
 # Function to calculate portfolio value
 def calculate_portfolio_value(last_prices):
@@ -121,17 +123,25 @@ def calculate_portfolio_value(last_prices):
     total_value = portfolio["cash"] + stock_value
     return portfolio["cash"], stock_value, total_value
 
-def calculate_total_value(last_prices):
-    stock_value = sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items())
+def calculate_total_value():
+    stock_value = 0
+    for code, volume in portfolio["stocks"].items():
+        price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == code].values[0]
+        stock_value += volume * price
     total_value = portfolio["cash"] + stock_value
     return total_value
 
-def calculate_stock_value(last_prices):
-    return sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items())
+def calculate_stock_value():
+    stock_value = 0
+    for code, volume in portfolio["stocks"].items():
+        price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == code].values[0]
+        stock_value += volume * price
+    return stock_value
 
 statements = []
 number_of_wins = 0
 queue_for_calculate_pl_dict = dict()
+
 # Function to execute a trade
 def execute_trade(stock_code, price, volume, trade_type, date, time):
     global portfolio
@@ -145,7 +155,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
             portfolio["cash"] -= trade_value
             portfolio["stocks"][stock_code] = portfolio["stocks"].get(stock_code, 0) + volume
             print(f"{date} {time} Bought {volume} of {stock_code} at {price} THB, amount cost: {trade_value} THB")
-            temp_portfolio_total_value = calculate_total_value(last_prices)
+            temp_portfolio_total_value = calculate_total_value()
             nav_lst.append(temp_portfolio_total_value)
             statements.append({
                 "Table Name": "Statement",
@@ -158,7 +168,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
                 "Price": price,
                 "Amount cost": trade_value,
                 "End_line_available": portfolio["cash"],
-                "Portfolio Value": sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items()),
+                "Portfolio Value": calculate_stock_value(),
                 "NAV": temp_portfolio_total_value
             })
             if len(queue_for_calculate_pl_dict) == 0 or stock_code not in queue_for_calculate_pl_dict :
@@ -172,7 +182,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
             portfolio["cash"] += trade_value
             portfolio["stocks"][stock_code] -= volume
             print(f"{date} {time} Sold {volume} of {stock_code} at {price} THB, amount cost: {trade_value} THB")
-            temp_portfolio_total_value = calculate_total_value(last_prices)
+            temp_portfolio_total_value = calculate_total_value()
             nav_lst.append(temp_portfolio_total_value)
             statements.append({
                 "Table Name": "Statement",
@@ -185,7 +195,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
                 "Price": price,
                 "Amount cost": trade_value,
                 "End_line_available": portfolio["cash"],
-                "Portfolio Value": sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items()),
+                "Portfolio Value": calculate_stock_value(),
                 "NAV": temp_portfolio_total_value
             })
             if stock_code in queue_for_calculate_pl_dict :
@@ -222,7 +232,7 @@ def optimize_trading_strategy(data):
         price = row["LastPrice"]
         
         # Buying strategy
-        if row['FinalSignal'] == 'Buy':
+        if row['VolumeSignal'] == 'Buy' and row['Flag'] == 'Sell':
             cash = portfolio["cash"]
             affordable_share = (cash // price) // 100 * 100
             if affordable_share >= 100:
@@ -230,7 +240,8 @@ def optimize_trading_strategy(data):
                 subsequent_data = processed_data.iloc[index:].loc[
                     (processed_data.iloc[index:]['ShareCode'] == stock_code) & 
                     (processed_data.iloc[index:]['LastPrice'] == price) &
-                    (processed_data.iloc[index:]['FinalSignal'] == 'Buy') & 
+                    (processed_data.iloc[index:]['VolumeSignal'] == 'Buy') & 
+                    (processed_data.iloc[index:]['Flag'] == 'Sell') &
                     (processed_data.iloc[index:]['Processed'] == False)
                 ]
                 
@@ -252,7 +263,7 @@ def optimize_trading_strategy(data):
                     last_prices_buy[stock_code] = price
 
         # Selling strategy
-        elif row['FinalSignal'] == 'Sell':
+        elif row['VolumeSignal'] == 'Hold' and row['Flag'] == 'Buy':
             if stock_code in portfolio["stocks"].keys():
                 shares = portfolio["stocks"].get(stock_code, 0)
                 shares = shares - (shares % 100)
@@ -260,7 +271,8 @@ def optimize_trading_strategy(data):
                     subsequent_data = processed_data.iloc[index:].loc[
                         (processed_data.iloc[index:]['ShareCode'] == stock_code) & 
                         (processed_data.iloc[index:]['LastPrice'] == price) &
-                        (processed_data.iloc[index:]['FinalSignal'] == 'Sell') & 
+                        (processed_data.iloc[index:]['VolumeSignal'] == 'Hold') & 
+                        (processed_data.iloc[index:]['Flag'] == 'Buy') &
                         (processed_data.iloc[index:]['Processed'] == False)
                     ]
                     
@@ -306,9 +318,6 @@ portfolio_data = []
 
 # Filter rows with 'OPEN1_E' flag for each Share Code
 open1e_rows = data[data['Flag'] == 'OPEN1_E'].groupby('ShareCode').last()
-
-# Filter rows with 'ATC' flag for each Share Code
-atc_rows = data[data['Flag'] == 'ATC'].groupby('ShareCode').last()
 
 # Reset index to make Share Code a column (optional)
 open1e_rows_reset = open1e_rows.reset_index()
@@ -406,7 +415,3 @@ summary_df = pd.DataFrame(summary_data)
 summary_df.to_csv(f'{output_dir}/summary/017_summary.csv', index=False)
 
 print("CSV files exported successfully.")
-
-end = time.time()
-t = end - start
-print(f"Time elapsed: {t} seconds")
