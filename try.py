@@ -7,7 +7,7 @@ import time
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_1212.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -232,7 +232,7 @@ def optimize_trading_strategy(data):
         price = row["LastPrice"]
         
         # Buying strategy
-        if row['VolumeSignal'] == 'Buy' and row['Flag'] == 'Sell':
+        if row['FinalSignal'] == 'Buy':
             cash = portfolio["cash"]
             affordable_share = (cash // price) // 100 * 100
             if affordable_share >= 100:
@@ -240,8 +240,7 @@ def optimize_trading_strategy(data):
                 subsequent_data = processed_data.iloc[index:].loc[
                     (processed_data.iloc[index:]['ShareCode'] == stock_code) & 
                     (processed_data.iloc[index:]['LastPrice'] == price) &
-                    (processed_data.iloc[index:]['VolumeSignal'] == 'Buy') & 
-                    (processed_data.iloc[index:]['Flag'] == 'Sell') &
+                    (processed_data.iloc[index:]['FinalSignal'] == 'Buy') & 
                     (processed_data.iloc[index:]['Processed'] == False)
                 ]
                 
@@ -263,7 +262,7 @@ def optimize_trading_strategy(data):
                     last_prices_buy[stock_code] = price
 
         # Selling strategy
-        elif row['VolumeSignal'] == 'Hold' and row['Flag'] == 'Buy':
+        elif row['FinalSignal'] == 'Sell':
             if stock_code in portfolio["stocks"].keys():
                 shares = portfolio["stocks"].get(stock_code, 0)
                 shares = shares - (shares % 100)
@@ -271,8 +270,7 @@ def optimize_trading_strategy(data):
                     subsequent_data = processed_data.iloc[index:].loc[
                         (processed_data.iloc[index:]['ShareCode'] == stock_code) & 
                         (processed_data.iloc[index:]['LastPrice'] == price) &
-                        (processed_data.iloc[index:]['VolumeSignal'] == 'Hold') & 
-                        (processed_data.iloc[index:]['Flag'] == 'Buy') &
+                        (processed_data.iloc[index:]['FinalSignal'] == 'Sell') &
                         (processed_data.iloc[index:]['Processed'] == False)
                     ]
                     
