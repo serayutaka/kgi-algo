@@ -100,7 +100,6 @@ portfolio = {
 }
 print(f"Initial Cash: {initial_cash}")
 print(f"Initial Portfolio: {portfolio}")
-time.sleep(5)
 
 def calculate_previous_portfolio_value():
     stock_value = sum(previous_portfolio["Actual Vol"] * previous_portfolio["Market Price"])
@@ -111,19 +110,30 @@ previous_portfolio_total_value = previous_summary["NAV"] if isinstance(previous_
 nav_lst = previous_statement["NAV"].to_list() if isinstance(previous_statement, pd.DataFrame) else [previous_portfolio_total_value]
 last_prices = {}
 
+# Filter rows with 'ATC' flag for each Share Code
+atc_rows = data[data['Flag'] == 'ATC'].groupby('ShareCode').last()
+atc_rows_reset = atc_rows.reset_index()
+
 # Function to calculate portfolio value
 def calculate_portfolio_value(last_prices):
     stock_value = sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items())
     total_value = portfolio["cash"] + stock_value
     return portfolio["cash"], stock_value, total_value
 
-def calculate_total_value(last_prices):
-    stock_value = sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items())
+def calculate_total_value():
+    stock_value = 0
+    for code, volume in portfolio["stocks"].items():
+        price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == code].values[0]
+        stock_value += volume * price
     total_value = portfolio["cash"] + stock_value
     return total_value
 
-def calculate_stock_value(last_prices):
-    return sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items())
+def calculate_stock_value():
+    stock_value = 0
+    for code, volume in portfolio["stocks"].items():
+        price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == code].values[0]
+        stock_value += volume * price
+    return stock_value
 
 statements = []
 number_of_wins = 0
@@ -141,7 +151,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
             portfolio["cash"] -= trade_value
             portfolio["stocks"][stock_code] = portfolio["stocks"].get(stock_code, 0) + volume
             print(f"{date} {time} Bought {volume} of {stock_code} at {price} THB, amount cost: {trade_value} THB")
-            temp_portfolio_total_value = calculate_total_value(last_prices)
+            temp_portfolio_total_value = calculate_total_value()
             nav_lst.append(temp_portfolio_total_value)
             statements.append({
                 "Table Name": "Statement",
@@ -154,7 +164,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
                 "Price": price,
                 "Amount cost": trade_value,
                 "End_line_available": portfolio["cash"],
-                "Portfolio Value": sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items()),
+                "Portfolio Value": calculate_stock_value(),
                 "NAV": temp_portfolio_total_value
             })
             if len(queue_for_calculate_pl_dict) == 0 or stock_code not in queue_for_calculate_pl_dict :
@@ -168,7 +178,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
             portfolio["cash"] += trade_value
             portfolio["stocks"][stock_code] -= volume
             print(f"{date} {time} Sold {volume} of {stock_code} at {price} THB, amount cost: {trade_value} THB")
-            temp_portfolio_total_value = calculate_total_value(last_prices)
+            temp_portfolio_total_value = calculate_total_value()
             nav_lst.append(temp_portfolio_total_value)
             statements.append({
                 "Table Name": "Statement",
@@ -181,7 +191,7 @@ def execute_trade(stock_code, price, volume, trade_type, date, time):
                 "Price": price,
                 "Amount cost": trade_value,
                 "End_line_available": portfolio["cash"],
-                "Portfolio Value": sum(portfolio["stocks"].get(code, 0) * price for code, price in last_prices.items()),
+                "Portfolio Value": calculate_stock_value(),
                 "NAV": temp_portfolio_total_value
             })
             if stock_code in queue_for_calculate_pl_dict :
@@ -309,12 +319,8 @@ portfolio_data = []
 # Filter rows with 'OPEN1_E' flag for each Share Code
 open1e_rows = data[data['Flag'] == 'OPEN1_E'].groupby('ShareCode').last()
 
-# Filter rows with 'ATC' flag for each Share Code
-atc_rows = data[data['Flag'] == 'ATC'].groupby('ShareCode').last()
-
 # Reset index to make Share Code a column (optional)
 open1e_rows_reset = open1e_rows.reset_index()
-atc_rows_reset = atc_rows.reset_index()
 
 buy_summary = statements_df[statements_df['Side'] == 'Buy'].groupby('Stock Name').agg({
     'Price': 'sum',
