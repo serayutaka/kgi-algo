@@ -7,7 +7,7 @@ import time
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_0412.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -311,6 +311,9 @@ print(f"\n% Return: {return_percentage:.2f}%")
 statements_df = pd.DataFrame(statements)
 statements_df.to_csv(f'{output_dir}/statement/017_statement.csv', index=False)
 
+statements_df_copy = statements_df.copy()
+statements_df_copy.sort_values("Time", inplace=True)
+
 # Prepare the Portfolio Table for export
 portfolio_data = []
 
@@ -373,25 +376,27 @@ for stock_code, volume in portfolio["stocks"].items():
 portfolio_df = pd.DataFrame(portfolio_data)
 portfolio_df.to_csv(f'{output_dir}/portfolio/017_portfolio.csv', index=False)
 
+maximum_value = max(nav_lst)
+start_index = statements_df_copy[statements_df_copy['NAV'] == maximum_value].index[0]
+test = statements_df_copy.iloc[start_index:]['NAV'].tolist()
+minimum_value = min(test)
 
-maximum_drawdown = abs((min(nav_lst) - max(nav_lst)) / max(nav_lst)) if max(nav_lst) > 0 else 0
+maximum_drawdown = (minimum_value - maximum_value) / maximum_value if max(nav_lst) > 0 else 0
 relative_drawdown = (maximum_drawdown / 10_000_000) * 100
-calmar_ratio = (return_percentage / maximum_drawdown) if maximum_drawdown != 0 else 0
+calmar_ratio = (return_percentage / (maximum_drawdown * 100)) if maximum_drawdown != 0 else 0
 total_wins = previous_summary['Number of Wins'].iloc[-1] + number_of_wins if isinstance(previous_summary, pd.DataFrame) else number_of_wins
 total_matches = previous_summary['Number of Matched Trades'].iloc[-1] + match_trades if isinstance(previous_summary, pd.DataFrame) else match_trades
 total_transactions = previous_summary['Number of Transactions'].iloc[-1] + len(statements) if isinstance(previous_summary, pd.DataFrame) else len(statements)
 sum_unrealized_pl = sum([float(row['Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_unrealized_pl_pct = sum([float(row['%Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_realized_pl = sum([float(row['Realized P/L']) for _, row in portfolio_df.iterrows()])
-maximum_value = max(nav_lst)
-minimum_value = min(nav_lst)
 win_rate = total_wins / total_transactions * 100
 
 # Prepare the Summary Table for export
 summary_data = [{
     'Table Name': 'Summary',
     'File Name': '017_summary.csv',
-    'trading_day': "{:d}".format(int(previous_summary['trading_day'].iloc[0])+1),
+    'trading_day': data['TradeDateTime'].iloc[-1].date(),
     'NAV': total_value,
     'End Line Available': "{:.4f}".format(portfolio["cash"]),
     'Start Line Available': "{:.4f}".format(initial_cash),
