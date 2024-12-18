@@ -7,7 +7,7 @@ import time
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_0412.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -341,6 +341,7 @@ def get_previous_actual_volume(stock_code, previous_portfolio):
         return stock_row["Actual Vol"].values[0]
     return 0
 
+sum_market_value = 0
 for stock_code, volume in portfolio["stocks"].items():
     if volume == 0:
         continue
@@ -351,6 +352,7 @@ for stock_code, volume in portfolio["stocks"].items():
     market_price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == stock_code].values[0]
     amount_cost = avg_cost * volume
     market_value = actual_vol * market_price
+    sum_market_value += market_value
     unrealized_pl = market_value - amount_cost
     unrealized_pl_pct = (unrealized_pl / amount_cost) * 100 if amount_cost > 0 else 0
 
@@ -383,7 +385,7 @@ minimum_value = min(test)
 
 maximum_drawdown = (minimum_value - maximum_value) / maximum_value if max(nav_lst) > 0 else 0
 relative_drawdown = (maximum_drawdown / 10_000_000) * 100
-calmar_ratio = (return_percentage / (maximum_drawdown * 100)) if maximum_drawdown != 0 else 0
+calmar_ratio = ((sum_market_value + portfolio["cash"] - initial_cash) / initial_cash * 100) / ((sum_market_value + portfolio["cash"] - 10_000_000) / 10_000_000) if maximum_drawdown != 0 else 0
 total_wins = previous_summary['Number of Wins'].iloc[-1] + number_of_wins if isinstance(previous_summary, pd.DataFrame) else number_of_wins
 total_matches = previous_summary['Number of Matched Trades'].iloc[-1] + match_trades if isinstance(previous_summary, pd.DataFrame) else match_trades
 total_transactions = previous_summary['Number of Transactions'].iloc[-1] + len(statements) if isinstance(previous_summary, pd.DataFrame) else len(statements)
@@ -391,12 +393,13 @@ sum_unrealized_pl = sum([float(row['Unrealized P/L']) for _, row in portfolio_df
 sum_unrealized_pl_pct = sum([float(row['%Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_realized_pl = sum([float(row['Realized P/L']) for _, row in portfolio_df.iterrows()])
 win_rate = total_wins / total_transactions * 100
+trading_day = int(previous_summary['trading_day'].iloc[0])+1 if isinstance(previous_summary, pd.DataFrame) else 1
 
 # Prepare the Summary Table for export
 summary_data = [{
     'Table Name': 'Summary',
     'File Name': '017_summary.csv',
-    'trading_day': data['TradeDateTime'].iloc[-1].date(),
+    'trading_day': trading_day,
     'NAV': total_value,
     'End Line Available': "{:.4f}".format(portfolio["cash"]),
     'Start Line Available': "{:.4f}".format(initial_cash),
