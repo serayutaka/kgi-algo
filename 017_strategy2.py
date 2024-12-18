@@ -7,7 +7,7 @@ import time
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_0412.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -95,7 +95,7 @@ previous_portfolio = load_previous("portfolio", "017")
 previous_statement = load_previous("statement", "017")
 
 # Portfolio settings
-initial_cash = previous_summary['Start Line Available'].iloc[-1] if isinstance(previous_summary, pd.DataFrame) else 10_000_000
+initial_cash = previous_summary['End Line Available'].iloc[-1] if isinstance(previous_summary, pd.DataFrame) else 10_000_000
 portfolio = {
     "cash": initial_cash,
     "stocks": previous_portfolio.set_index('Stock Name')['Actual Vol'].to_dict() if isinstance(previous_portfolio, pd.DataFrame) else {}
@@ -394,7 +394,7 @@ summary_data = [{
     'trading_day': "{:d}".format(int(previous_summary['trading_day'].iloc[0])+1),
     'NAV': total_value,
     'End Line Available': "{:.4f}".format(portfolio["cash"]),
-    'Start Line Available': "{:.4f}".format(portfolio["cash"]),
+    'Start Line Available': "{:.4f}".format(initial_cash),
     'Number of Wins': total_wins,
     'Number of Matched Trades': total_matches,
     'Number of Transactions': total_transactions,
