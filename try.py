@@ -3,6 +3,8 @@ import pandas as pd
 import os
 import time
 
+start = time.time()
+
 # Define the base directory dynamically based on the OS
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
@@ -46,17 +48,6 @@ def calculate_indicators(df):
     # Moving Average - use more efficient rolling
     df['MA_3'] = grouped['LastPrice'].transform(lambda x: x.rolling(window=3, min_periods=1).mean())
     
-    # RSI - simplified vectorized calculation
-    def fast_rsi(x, window=3):
-        delta = np.diff(x)
-        up, down = delta.clip(min=0), -delta.clip(max=0)
-        roll_up = pd.Series(up).ewm(span=window, adjust=False).mean()
-        roll_down = pd.Series(down).ewm(span=window, adjust=False).mean()
-        rs = roll_up / roll_down
-        return 100.0 - (100.0 / (1.0 + rs.values[0]))
-    
-    df['rsi'] = grouped['LastPrice'].transform(fast_rsi)
-    
     # MACD - simplified calculation
     df['MACD'] = grouped['LastPrice'].transform(lambda x: 
         x.ewm(span=12, adjust=False).mean() - x.ewm(span=26, adjust=False).mean()
@@ -65,19 +56,17 @@ def calculate_indicators(df):
     
     # Vectorized Volume Signal
     condition_1 = df['LastPrice'] < df['MA_3']
-    condition_2 = df['rsi'] < 20
-    condition_3 = df['MACD'] > df['MACD_Signal']
+    condition_2 = df['MACD'] > df['MACD_Signal']
     
     passed_conditions = (
         condition_1.astype(int) + 
-        condition_2.astype(int) + 
-        condition_3.astype(int)
+        condition_2.astype(int)
     )
     
     df['VolumeSignal'] = np.where(
         df['MACD'].isna(),
         np.where(df['Volume'] > 19000, 'Buy', 'Hold'),
-        np.where(passed_conditions >= 2, 'Buy', 'Hold')
+        np.where(passed_conditions == 2, 'Buy', 'Hold')
     )
 
     df['FinalSignal'] = np.where(
@@ -95,7 +84,7 @@ previous_portfolio = load_previous("portfolio", "017")
 previous_statement = load_previous("statement", "017")
 
 # Portfolio settings
-initial_cash = previous_summary['Start Line Available'].iloc[-1] if isinstance(previous_summary, pd.DataFrame) else 10_000_000
+initial_cash = previous_summary['End Line Available'].iloc[-1] if isinstance(previous_summary, pd.DataFrame) else 10_000_000
 portfolio = {
     "cash": initial_cash,
     "stocks": previous_portfolio.set_index('Stock Name')['Actual Vol'].to_dict() if isinstance(previous_portfolio, pd.DataFrame) else {}
@@ -114,8 +103,6 @@ last_prices = {}
 # Filter rows with 'ATC' flag for each Share Code
 atc_rows = data[data['Flag'] == 'ATC'].groupby('ShareCode').last()
 atc_rows_reset = atc_rows.reset_index()
-
-time.sleep(5)
 
 # Function to calculate portfolio value
 def calculate_portfolio_value(last_prices):
@@ -311,6 +298,9 @@ print(f"\n% Return: {return_percentage:.2f}%")
 statements_df = pd.DataFrame(statements)
 statements_df.to_csv(f'{output_dir}/statement/017_statement.csv', index=False)
 
+statements_df_copy = statements_df.copy()
+statements_df_copy.sort_values("Time", inplace=True)
+
 # Prepare the Portfolio Table for export
 portfolio_data = []
 
@@ -338,6 +328,7 @@ def get_previous_actual_volume(stock_code, previous_portfolio):
         return stock_row["Actual Vol"].values[0]
     return 0
 
+sum_market_value = 0
 for stock_code, volume in portfolio["stocks"].items():
     if volume == 0:
         continue
@@ -348,6 +339,7 @@ for stock_code, volume in portfolio["stocks"].items():
     market_price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == stock_code].values[0]
     amount_cost = avg_cost * volume
     market_value = actual_vol * market_price
+    sum_market_value += market_value
     unrealized_pl = market_value - amount_cost
     unrealized_pl_pct = (unrealized_pl / amount_cost) * 100 if amount_cost > 0 else 0
 
@@ -373,27 +365,31 @@ for stock_code, volume in portfolio["stocks"].items():
 portfolio_df = pd.DataFrame(portfolio_data)
 portfolio_df.to_csv(f'{output_dir}/portfolio/017_portfolio.csv', index=False)
 
+maximum_value = max(nav_lst)
+start_index = statements_df_copy[statements_df_copy['NAV'] == maximum_value].index[0]
+test = statements_df_copy.iloc[start_index:]['NAV'].tolist()
+minimum_value = min(test)
 
-maximum_drawdown = abs((min(nav_lst) - max(nav_lst)) / max(nav_lst)) if max(nav_lst) > 0 else 0
+maximum_drawdown = (minimum_value - maximum_value) / maximum_value if max(nav_lst) > 0 else 0
 relative_drawdown = (maximum_drawdown / 10_000_000) * 100
-calmar_ratio = (return_percentage / maximum_drawdown) if maximum_drawdown != 0 else 0
+calmar_ratio = ((sum_market_value + portfolio["cash"] - initial_cash) / initial_cash * 100) / ((sum_market_value + portfolio["cash"] - 10_000_000) / 10_000_000) if maximum_drawdown != 0 else 0
 total_wins = previous_summary['Number of Wins'].iloc[-1] + number_of_wins if isinstance(previous_summary, pd.DataFrame) else number_of_wins
 total_matches = previous_summary['Number of Matched Trades'].iloc[-1] + match_trades if isinstance(previous_summary, pd.DataFrame) else match_trades
 total_transactions = previous_summary['Number of Transactions'].iloc[-1] + len(statements) if isinstance(previous_summary, pd.DataFrame) else len(statements)
 sum_unrealized_pl = sum([float(row['Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_unrealized_pl_pct = sum([float(row['%Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_realized_pl = sum([float(row['Realized P/L']) for _, row in portfolio_df.iterrows()])
-maximum_value = max(nav_lst)
-minimum_value = min(nav_lst)
 win_rate = total_wins / total_transactions * 100
+trading_day = int(previous_summary['trading_day'].iloc[0])+1 if isinstance(previous_summary, pd.DataFrame) else 1
 
 # Prepare the Summary Table for export
 summary_data = [{
     'Table Name': 'Summary',
     'File Name': '017_summary.csv',
+    'trading_day': trading_day,
     'NAV': total_value,
     'End Line Available': "{:.4f}".format(portfolio["cash"]),
-    'Start Line Available': "{:.4f}".format(portfolio["cash"]),
+    'Start Line Available': "{:.4f}".format(initial_cash),
     'Number of Wins': total_wins,
     'Number of Matched Trades': total_matches,
     'Number of Transactions': total_transactions,
@@ -411,5 +407,8 @@ summary_data = [{
 
 summary_df = pd.DataFrame(summary_data)
 summary_df.to_csv(f'{output_dir}/summary/017_summary.csv', index=False)
+
+end = time.time()
+print(end-start)
 
 print("CSV files exported successfully.")
