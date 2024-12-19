@@ -406,7 +406,8 @@ summary_data = [{
 }]
 
 summary_df = pd.DataFrame(summary_data)
-summary_df.to_csv(f'{output_dir}/summary/017_summary.csv', index=False)
+previous_summary = pd.concat([previous_summary, summary_df], ignore_index=True) if isinstance(previous_summary, pd.DataFrame) else summary_df
+previous_summary.to_csv(f'{output_dir}/summary/017_summary.csv', index=False)
 
 end = time.time()
 print(f"time to run program: {end-start}")
