@@ -245,7 +245,6 @@ def optimize_trading_strategy(data):
                     execute_trade(stock_code, price, total_shares, "Buy", 
                                   processed_data.loc[processed_rows_index[-1]]['TradeDateTime'].date(), 
                                   processed_data.loc[processed_rows_index[-1]]['TradeDateTime'].time())
-                    match_trades += 1
                     last_prices_buy[stock_code] = price
 
         # Selling strategy
@@ -367,19 +366,19 @@ portfolio_df.to_csv(f'{output_dir}/portfolio/017_portfolio.csv', index=False)
 
 maximum_value = max(nav_lst)
 start_index = statements_df_copy[statements_df_copy['NAV'] == maximum_value].index[0]
-test = statements_df_copy.iloc[start_index:]['NAV'].tolist()
-minimum_value = min(test)
+lst_after_max_value = statements_df_copy.iloc[start_index:]['NAV'].tolist()
+minimum_value = min(lst_after_max_value)
 
-maximum_drawdown = (minimum_value - maximum_value) / maximum_value if max(nav_lst) > 0 else 0
+maximum_drawdown = ((minimum_value - maximum_value) / maximum_value)*100 if max(nav_lst) > 0 else 0
 relative_drawdown = (maximum_drawdown / 10_000_000) * 100
-calmar_ratio = ((sum_market_value + portfolio["cash"] - initial_cash) / initial_cash * 100) / ((sum_market_value + portfolio["cash"] - 10_000_000) / 10_000_000) if maximum_drawdown != 0 else 0
+calmar_ratio = return_percentage / maximum_drawdown if abs(maximum_drawdown) > 0 else 0
 total_wins = previous_summary['Number of Wins'].iloc[-1] + number_of_wins if isinstance(previous_summary, pd.DataFrame) else number_of_wins
 total_matches = previous_summary['Number of Matched Trades'].iloc[-1] + match_trades if isinstance(previous_summary, pd.DataFrame) else match_trades
 total_transactions = previous_summary['Number of Transactions'].iloc[-1] + len(statements) if isinstance(previous_summary, pd.DataFrame) else len(statements)
 sum_unrealized_pl = sum([float(row['Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_unrealized_pl_pct = sum([float(row['%Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_realized_pl = sum([float(row['Realized P/L']) for _, row in portfolio_df.iterrows()])
-win_rate = total_wins / total_transactions * 100
+win_rate = total_wins / total_matches * 100
 trading_day = int(previous_summary['trading_day'].iloc[0])+1 if isinstance(previous_summary, pd.DataFrame) else 1
 
 # Prepare the Summary Table for export
