@@ -327,19 +327,14 @@ def get_previous_actual_volume(stock_code, previous_portfolio):
         return stock_row["Actual Vol"].values[0]
     return 0
 
-sum_market_value = 0
 for stock_code, volume in portfolio["stocks"].items():
-    start_vol = get_previous_actual_volume(stock_code, previous_portfolio)
-    if volume == 0 and start_vol == 0:
-        continue
     price = last_prices.get(stock_code, 0)
     start_vol = get_previous_actual_volume(stock_code, previous_portfolio)
     actual_vol = volume
     avg_cost = data[(data['ShareCode'] == stock_code) & (data['Flag'].isin(['Buy', 'Sell']))]['LastPrice'].mean()
     market_price = atc_rows_reset["LastPrice"].loc[atc_rows_reset["ShareCode"] == stock_code].values[0]
-    amount_cost = avg_cost * volume
+    amount_cost = avg_cost * actual_vol
     market_value = actual_vol * market_price
-    sum_market_value += market_value
     unrealized_pl = market_value - amount_cost
     unrealized_pl_pct = (unrealized_pl / amount_cost) * 100 if amount_cost > 0 else 0
 
@@ -347,8 +342,6 @@ for stock_code, volume in portfolio["stocks"].items():
     buy_tot_amount = buy_summary["Price"].loc[buy_summary["Stock Name"] == stock_code].values[0]
     realized_pl = sell_tot_amount - buy_tot_amount
 
-    portfolio_value = portfolio["cash"] + sum_market_value
-    
     portfolio_data.append({
         'Table Name': 'Portfolio',
         'File Name': '017_portfolio.csv',
@@ -362,7 +355,6 @@ for stock_code, volume in portfolio["stocks"].items():
         'Unrealized P/L': "{:.4f}".format(unrealized_pl),
         '%Unrealized P/L': "{:.4f}".format(unrealized_pl_pct),
         'Realized P/L': "{:.4f}".format(realized_pl),
-        'Portfolio Value': "{:.4f}".format(portfolio_value)
     })
 
 portfolio_df = pd.DataFrame(portfolio_data)
@@ -374,6 +366,10 @@ lst_after_max_value = statements_df_copy.iloc[start_index:]['NAV'].tolist()
 minimum_value = min(lst_after_max_value)
 
 maximum_drawdown = ((minimum_value - maximum_value) / maximum_value)*100 if max(nav_lst) > 0 else 0
+prev_maximum_drawdown = previous_summary['Maximum Drawdown'].iloc[-1] if isinstance(previous_summary, pd.DataFrame) else 0
+if abs(maximum_drawdown) < abs(prev_maximum_drawdown):
+    maximum_drawdown = prev_maximum_drawdown
+
 relative_drawdown = (maximum_drawdown / 10_000_000) * 100
 calmar_ratio = return_percentage / maximum_drawdown if abs(maximum_drawdown) > 0 else 0
 total_wins = previous_summary['Number of Wins'].iloc[-1] + number_of_wins if isinstance(previous_summary, pd.DataFrame) else number_of_wins
@@ -383,7 +379,7 @@ sum_unrealized_pl = sum([float(row['Unrealized P/L']) for _, row in portfolio_df
 sum_unrealized_pl_pct = sum([float(row['%Unrealized P/L']) for _, row in portfolio_df.iterrows()])
 sum_realized_pl = sum([float(row['Realized P/L']) for _, row in portfolio_df.iterrows()])
 win_rate = total_wins / total_matches * 100
-trading_day = int(previous_summary['trading_day'].iloc[0])+1 if isinstance(previous_summary, pd.DataFrame) else 1
+trading_day = int(previous_summary['trading_day'].iloc[-1])+1 if isinstance(previous_summary, pd.DataFrame) else 1
 
 # Prepare the Summary Table for export
 summary_data = [{
