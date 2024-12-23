@@ -9,7 +9,7 @@ start = time.time()
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_1112.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
