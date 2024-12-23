@@ -9,7 +9,7 @@ start = time.time()
 home_dir = os.path.expanduser('~')  # Expands to the user's home directory
 
 # Define paths for reading and writing files
-file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks.csv')
+file_path = os.path.join(home_dir, 'Desktop', 'Daily_Ticks_1112.csv')
 
 output_dir = os.path.join(home_dir, 'Desktop', 'competition_api', 'Result')
 os.makedirs(os.path.join(output_dir, 'portfolio'), exist_ok=True)
@@ -131,7 +131,7 @@ queue_for_calculate_pl_dict = dict()
 
 # Function to execute a trade
 def execute_trade(stock_code, price, volume, trade_type, date, time):
-    global portfolio
+    global portfolio 
     global number_of_wins
     
     # Calculate trade value
@@ -329,7 +329,8 @@ def get_previous_actual_volume(stock_code, previous_portfolio):
 
 sum_market_value = 0
 for stock_code, volume in portfolio["stocks"].items():
-    if volume == 0:
+    start_vol = get_previous_actual_volume(stock_code, previous_portfolio)
+    if volume == 0 and start_vol == 0:
         continue
     price = last_prices.get(stock_code, 0)
     start_vol = get_previous_actual_volume(stock_code, previous_portfolio)
@@ -345,6 +346,8 @@ for stock_code, volume in portfolio["stocks"].items():
     sell_tot_amount = sell_summary["Price"].loc[sell_summary["Stock Name"] == stock_code].values[0]
     buy_tot_amount = buy_summary["Price"].loc[buy_summary["Stock Name"] == stock_code].values[0]
     realized_pl = sell_tot_amount - buy_tot_amount
+
+    portfolio_value = portfolio["cash"] + sum_market_value
     
     portfolio_data.append({
         'Table Name': 'Portfolio',
@@ -358,7 +361,8 @@ for stock_code, volume in portfolio["stocks"].items():
         'Market Value': "{:.4f}".format(market_value),
         'Unrealized P/L': "{:.4f}".format(unrealized_pl),
         '%Unrealized P/L': "{:.4f}".format(unrealized_pl_pct),
-        'Realized P/L': "{:.4f}".format(realized_pl)
+        'Realized P/L': "{:.4f}".format(realized_pl),
+        'Portfolio Value': "{:.4f}".format(portfolio_value)
     })
 
 portfolio_df = pd.DataFrame(portfolio_data)
